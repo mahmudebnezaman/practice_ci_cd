@@ -1,0 +1,41 @@
+stages:
+  - setup
+  - build
+  - upload
+
+variables:
+  FLUTTER_IMAGE: "ghcr.io/cirruslabs/flutter:stable"
+
+cache:
+  key: ${CI_COMMIT_REF_SLUG}
+  paths:
+    - .pub-cache/
+
+setup:
+  stage: setup
+  image: $FLUTTER_IMAGE
+  script:
+    - flutter pub get
+
+build:
+  stage: build
+  image: $FLUTTER_IMAGE
+  dependencies:
+    - setup
+  script:
+    - flutter build apk --release
+  artifacts:
+    paths:
+      - build/app/outputs/flutter-apk/app-release.apk
+    expire_in: 1 day
+
+upload:
+  stage: upload
+  image: alpine:latest
+  dependencies:
+    - build
+  before_script:
+    - apk add --no-cache curl jq openssl bash
+  script:
+    - chmod +x scripts/upload_to_gdrive.sh
+    - ./scripts/upload_to_gdrive.sh "build/app/outputs/flutter-apk/app-release.apk" "app-$CI_COMMIT_SHORT_SHA.apk" "$GDRIVE_FOLDER_ID" "$GDRIVE_SERVICE_ACCOUNT_JSON"
