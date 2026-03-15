@@ -1,0 +1,152 @@
+name: Flutter CI/CD
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  # ─────────────────────────────────────────────
+  # JOB 1: Setup – fetch dependencies
+  # ─────────────────────────────────────────────
+  setup:
+    name: Setup
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "stable"
+          channel: "stable"
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Cache pub packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.pub-cache
+          key: pub-cache-${{ runner.os }}-${{ hashFiles('**/pubspec.lock') }}
+          restore-keys: |
+            pub-cache-${{ runner.os }}-
+
+  # ─────────────────────────────────────────────
+  # JOB 2: Analyze & Test
+  # ─────────────────────────────────────────────
+  analyze:
+    name: Analyze & Test
+    runs-on: ubuntu-latest
+    needs: setup
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "stable"
+          channel: "stable"
+          cache: true
+
+      - name: Restore pub cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.pub-cache
+          key: pub-cache-${{ runner.os }}-${{ hashFiles('**/pubspec.lock') }}
+          restore-keys: |
+            pub-cache-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Analyze code
+        run: flutter analyze
+
+      - name: Run tests
+        run: flutter test
+
+  # ─────────────────────────────────────────────
+  # JOB 3: Build APK
+  # ─────────────────────────────────────────────
+  build:
+    name: Build APK
+    runs-on: ubuntu-latest
+    needs: analyze
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "stable"
+          channel: "stable"
+          cache: true
+
+      - name: Restore pub cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.pub-cache
+          key: pub-cache-${{ runner.os }}-${{ hashFiles('**/pubspec.lock') }}
+          restore-keys: |
+            pub-cache-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build release APK
+        run: flutter build apk --release
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release-${{ github.sha }}
+          path: build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 1
+
+  # ─────────────────────────────────────────────
+  # JOB 4: Upload to Google Drive
+  # (runs only on push to main)
+  # ─────────────────────────────────────────────
+  upload:
+    name: Upload to Google Drive
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download APK artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: app-release-${{ github.sha }}
+          path: build/app/outputs/flutter-apk/
+
+      - name: Install upload dependencies
+        run: sudo apt-get install -y curl jq openssl
+
+      - name: Upload APK to Google Drive
+        env:
+          GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
+          GDRIVE_SERVICE_ACCOUNT_JSON: ${{ secrets.GDRIVE_SERVICE_ACCOUNT_JSON }}
+        run: |
+          chmod +x scripts/upload_to_gdrive.sh
+          SHORT_SHA="${GITHUB_SHA::8}"
+          ./scripts/upload_to_gdrive.sh \
+            "build/app/outputs/flutter-apk/app-release.apk" \
+            "app-${SHORT_SHA}.apk" \
+            "$GDRIVE_FOLDER_ID" \
+            "$GDRIVE_SERVICE_ACCOUNT_JSON"
